@@ -433,15 +433,21 @@ func (s *State) CreateUser(user types.User) (*types.User, change.Change, error) 
 // UpdateUser modifies an existing user using the provided update function within a transaction.
 // Returns the updated user, change set, and any error.
 func (s *State) UpdateUser(userID types.UserID, updateFn func(*types.User) error) (*types.User, change.Change, error) {
+	var changed bool
+
 	user, err := hsdb.Write(s.db.DB, func(tx *gorm.DB) (*types.User, error) {
 		user, err := hsdb.GetUserByID(tx, userID)
 		if err != nil {
 			return nil, err
 		}
 
+		before := *user
+
 		if err := updateFn(user); err != nil { //nolint:noinlineerr
 			return nil, err
 		}
+
+		changed = *user != before
 
 		// Use Updates() to only update modified fields, preserving unchanged values.
 		err = tx.Updates(user).Error
@@ -461,7 +467,32 @@ func (s *State) UpdateUser(userID types.UserID, updateFn func(*types.User) error
 		return user, change.Change{}, fmt.Errorf("updating policy manager after user update: %w", err)
 	}
 
-	// TODO(kradalby): We might want to update nodestore with the user data
+	// OIDC applies the claims on every login, usually without changing
+	// anything. Avoid rewriting the NodeStore and pushing peer updates then.
+	if !changed {
+		return user, c, nil
+	}
+
+	// Tagged nodes are not indexed by user, so scan all nodes to also
+	// refresh the creator they expose.
+	updates := make(map[types.NodeID]UpdateNodeFunc)
+
+	for _, nv := range s.nodeStore.ListNodes().All() { //nolint:unqueryvet // NodeStore.ListNodes not a SQL query
+		if nv.TypedUserID() != userID {
+			continue
+		}
+
+		updates[nv.ID()] = func(n *types.Node) {
+			if n.TypedUserID() == userID {
+				n.User = new(*user)
+			}
+		}
+	}
+
+	if len(updates) > 0 {
+		s.nodeStore.UpdateNodes(updates)
+		c = c.Merge(change.PeersChanged("user updated", slices.Collect(maps.Keys(updates))...))
+	}
 
 	return user, c, nil
 }

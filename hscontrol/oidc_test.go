@@ -615,3 +615,36 @@ func TestRouterMethodNotAllowedIncludesAllow(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 	assert.Equal(t, []string{http.MethodGet}, resp.Header.Values("Allow"))
 }
+
+func TestOIDCLoginRefreshesUserOnNodesOnlyWhenChanged(t *testing.T) {
+	app := createTestApp(t)
+	a := &AuthProviderOIDC{h: app, cfg: &types.OIDCConfig{}}
+
+	claims := &types.OIDCClaims{
+		Iss:           "https://idp.example.com",
+		Sub:           "alice",
+		Email:         "alice@example.com",
+		EmailVerified: true,
+	}
+
+	user, _, err := a.createOrUpdateUserFromClaim(claims)
+	require.NoError(t, err)
+
+	node := app.state.CreateRegisteredNodeForTest(user, "alice-node")
+	node.User = user
+	app.state.PutNodeInStoreForTest(*node)
+
+	_, c, err := a.createOrUpdateUserFromClaim(claims)
+	require.NoError(t, err)
+	assert.True(t, c.IsEmpty())
+
+	claims.Email = "alice@new.example.com"
+
+	_, c, err = a.createOrUpdateUserFromClaim(claims)
+	require.NoError(t, err)
+	assert.Equal(t, []types.NodeID{node.ID}, c.PeersChanged)
+
+	nv, ok := app.state.GetNodeByID(node.ID)
+	require.True(t, ok)
+	assert.Equal(t, "alice@new.example.com", nv.User().Email())
+}

@@ -138,6 +138,7 @@ clients, and how to run the same setup without Nix.
 - Fix SSH check periods coming from the first check rule for a node pair instead of the rule for the login user [#3517](https://github.com/juanfont/headscale/pull/3517)
 - Policy changes resend a node's SSH policy only when it changed, sparing clients a full netmap rebuild [#3517](https://github.com/juanfont/headscale/pull/3517)
 - Fix every grant being fully resolved as if it had `via` when the policy has no `via` grants, slowing map generation on large tailnets [#3538](https://github.com/juanfont/headscale/pull/3538)
+- Fix `headscale nodes list` and peers showing a user's old name or email after the user is renamed or its OIDC profile changes [#3471](https://github.com/juanfont/headscale/issues/3471)
 
 ## 0.29.5 (202x-xx-xx)
 

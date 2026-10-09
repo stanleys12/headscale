@@ -626,6 +626,38 @@ func TestIssuesServerMutations(t *testing.T) {
 			})
 	})
 
+	// Renaming a user should update its profile on peers of its nodes.
+	t.Run("user_rename_propagates_to_peers", func(t *testing.T) {
+		t.Parallel()
+
+		srv := servertest.NewServer(t)
+		user1 := srv.CreateUser(t, "urename-user1")
+		user2 := srv.CreateUser(t, "urename-user2")
+
+		servertest.NewClient(t, srv, "urename-node1",
+			servertest.WithUser(user1))
+		c2 := servertest.NewClient(t, srv, "urename-node2",
+			servertest.WithUser(user2))
+
+		c2.WaitForPeers(t, 1, 10*time.Second)
+
+		_, renameChange, err := srv.State().RenameUser(types.UserID(user1.ID), "urename-renamed")
+		require.NoError(t, err)
+		srv.App.Change(renameChange)
+
+		c2.WaitForCondition(t, "renamed user profile visible", 10*time.Second,
+			func(nm *netmap.NetworkMap) bool {
+				for _, p := range nm.Peers {
+					profile, ok := nm.UserProfiles[p.User()]
+					if ok && profile.LoginName() == "urename-renamed" {
+						return true
+					}
+				}
+
+				return false
+			})
+	})
+
 	// Deleting a node via API should remove it from all peers.
 	t.Run("node_delete_removes_from_all_peers", func(t *testing.T) {
 		t.Parallel()
